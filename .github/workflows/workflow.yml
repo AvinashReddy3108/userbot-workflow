@@ -1,0 +1,92 @@
+name: Blek Megik
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  lmao:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel Previous Workflow Runs
+        uses: styfle/cancel-workflow-action@0.9.1
+        with:
+          all_but_latest: true
+          access_token: ${{ secrets.TOKEN }}
+
+      - name: Purge Workflow History
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 0
+      
+      - name: Export some variables
+        id: export-vars
+        run: |
+          # Get current date
+          echo "::set-output name=date::$(date +'%Y%m%d')"
+          # Get current directory
+          echo "::set-output name=pwd::$(pwd)"
+        shell: bash
+
+      - name: Setup GIT creds
+        run: |
+          git config --global user.name ${{ secrets.USERNAME }}
+          git config --global user.email ${{ secrets.EMAIL }}
+          git config --global credential.helper store
+          echo "https://${{ secrets.USERNAME }}:${{ secrets.TOKEN }}@github.com" > ~/.git-credentials
+        shell: bash
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Clone UB repo
+        run: |
+          git clone --depth=1 https://github.com/AvinashReddy3108/PaperplaneRemix
+        shell: bash
+
+      - name: Fetch UB config file
+        run: |
+          curl -sL https://${{ secrets.TOKEN }}@raw.githubusercontent.com/${{ secrets.USERNAME }}/${{ secrets.CONFIG_REPO }}/master/config.ini -o ${{ steps.export-vars.outputs.pwd }}/PaperplaneRemix/config.ini
+        shell: bash
+        
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: container-cache-${{ steps.export-vars.outputs.date }}
+          restore-keys: |
+            container-cache-
+
+      - name: Build Docker container
+        uses: docker/build-push-action@v3
+        with:
+          context: ${{ steps.export-vars.outputs.pwd }}/PaperplaneRemix/
+          builder: ${{ steps.buildx.outputs.name }}
+          load: true
+          tags: userbot:runner
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Go brrrrrrrr
+        timeout-minutes: 350
+        continue-on-error: true
+        run: |
+          docker run --privileged -i userbot:runner
+        shell: bash
+
+      - name: Prepare for next run
+        run: |
+          git clone --depth=1 "https://github.com/${{ secrets.USERNAME }}/userbot-workflow"
+          cd userbot-workflow && sed -i "16s/Last Workflow Run-.*-informational.svg/Last Workflow Run-$(TZ='${{ secrets.TZ }}' date)-informational.svg/" README.md
+          git add README.md && git commit --amend -m "$(curl -s http://whatthecommit.com/index.txt)"
+          git push --force "https://${{ secrets.TOKEN }}@github.com/${{ secrets.USERNAME }}/userbot-workflow" HEAD:main
+        shell: bash
